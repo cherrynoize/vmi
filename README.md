@@ -49,6 +49,6 @@ types you don't want to be verified.
 
 ## Todo
 
-- read from env vars files/file types to ignore
-- ignoring single files/directories
-- add *probe* (`ffprobe`) option to only check header metadata (faster)
+- Environment variable for files/file types to ignore
+- Option to ignore single files/directories
+- *Probe* (`ffprobe`) option to only check header metadata (faster)
