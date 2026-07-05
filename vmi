@@ -237,9 +237,12 @@ check_file() {
     ffmpeg)
       local lvl="error"
       [[ $verbose -eq 1 ]] && lvl="warning"
-      ffmpeg -v "$lvl" -i "$file" -f null - 2>"$errlog"
+      ffprobe -v "$lvl" "$file" 2>"$errlog"
       local rc=$?
-      [[ $rc -eq 0 && ! -s "$errlog" ]] && result="OK" || result="FAIL"
+      [[ $rc -eq 0 && ! -s "$errlog" ]] && result="OK" || result="METADATA ERROR"
+      ffmpeg -v "$lvl" -i "$file" -f null - 2>>"$errlog"
+      local rc=$?
+      [[ $rc -eq 0 ]] || result="FAIL"
       ;;
     qpdf)
       qpdf --check "$file" >"$errlog" 2>&1
@@ -289,7 +292,7 @@ else
 fi
 
 if [[ ${#files[@]} -eq 0 ]]; then
-  echo "No files found for given file types inside directory '$base_dir'."
+  echo "No files of given file types found inside directory '$base_dir'."
   if [[ $ext_any -eq 0 ]]; then
     echo "Scanned '$base_dir' for: ${exts[*]}"
   fi
@@ -297,9 +300,9 @@ if [[ ${#files[@]} -eq 0 ]]; then
 fi
 
 if [[ $list_only -eq 1 || $verbose -eq 1 ]]; then
-  echo "Found (${#files[@]}) files for given file types inside directory '$base_dir':"
+  echo "Found (${#files[@]}) files of given file types inside directory '$base_dir':"
   printf '  %s\n' "${files[@]}"
-  echo
+  printf -- "----------------------------------------\n"
   [[ $list_only -eq 1 ]] && exit 0
 fi
 
@@ -308,25 +311,26 @@ fail=0
 skip=0
 failed_files=()
 
-echo "Scanning '$base_dir'$([[ $ext_any -eq 0 ]] && [[ $verbose -eq 1 ]] && echo " for: ${exts[*]}") ..."
+echo "Checking dir '$base_dir'$([[ $ext_any -eq 0 ]] && [[ $verbose -eq 1 ]] && echo " for: ${exts[*]}") ..."
 echo
 
 for file in "${files[@]}"; do
   errlog="$(mktemp)"
   result=""
+  printf '\r\033[KScanning : %s ...' "$file"
   check_file "$file" "$errlog"
+  if [[ $result == "METADATA ERROR" || $result == "FAIL" ]] || [[ $verbose -eq 1 ]]; then
+    printf '\r\033[K%s : %s\n' "$result" "$file"
+  fi
   case "$result" in
     OK)
-      echo "OK   : $file"
       ok=$((ok+1))
       [[ $verbose -eq 1 && -s "$errlog" ]] && sed 's/^/       /' "$errlog"
       ;;
     SKIP)
-      echo "SKIP : $file"
       skip=$((skip+1))
       ;;
-    FAIL)
-      echo "FAIL : $file"
+    "METADATA ERROR"|FAIL)
       sed 's/^/       /' "$errlog"
       fail=$((fail+1))
       failed_files+=("$file")
@@ -335,8 +339,7 @@ for file in "${files[@]}"; do
   rm -f "$errlog"
 done
 
-echo
-echo "----------------------------------------"
+printf '\r\033[K----------------------------------------\n'
 echo "Checked: $((ok+fail))  OK: $ok  FAIL: $fail  SKIP: $skip"
 if [[ $fail -gt 0 ]]; then
   echo
