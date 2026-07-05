@@ -31,9 +31,9 @@ hidden_opts=( \( -path '*/.*' -prune \) -o )
 
 usage() {
   cat <<EOF
-Usage: $(basename "$0") [OPTIONS] [DIR]
+Usage: $(basename "$0") [OPTIONS] [TARGET]
 
-Verify integrity for specified files in DIR (defaults to current path).
+Verify integrity for specified files in TARGET (defaults to working directory).
 With no file options all found files are checked (regardless of type).
 
   -A, --all           check all supported types
@@ -51,6 +51,7 @@ With no file options all found files are checked (regardless of type).
   -V, --verbose       list files first, then check with increased tool verbosity
   -h, --help          show this help message
 
+  TARGET              path to file or directory
   EXT                 a comma-separated list of file extensions
 
 Examples
