@@ -1,0 +1,345 @@
+#!/usr/bin/env bash
+# vmi - verify media integrity
+# recursively checks integrity of media/document/archive files
+set -uo pipefail
+
+img_exts=(jpg jpeg png gif bmp tiff tif webp heic)
+vid_exts=(mp4 avi mkv mov wmv flv webm m4v mpg mpeg ts)
+aud_exts=(mp3 wav flac aac ogg m4a wma opus)
+doc_exts=(pdf)
+arc_exts=(zip tar gz tgz bz2 7z rar)
+
+declare -A ext_tool
+for e in "${img_exts[@]}" "${vid_exts[@]}" "${aud_exts[@]}"; do ext_tool[$e]="ffmpeg"; done
+ext_tool[pdf]="qpdf"
+ext_tool[zip]="unzip"
+ext_tool[tar]="tar"
+ext_tool[tgz]="tar"
+ext_tool[gz]="gzip"
+ext_tool[bz2]="bzip2"
+ext_tool[7z]="7z"
+ext_tool[rar]="unrar"
+ext_tool_default="ffmpeg" # fallback option (unknown extensions)
+
+ext_all=0 ext_img=0 ext_vid=0 ext_aud=0 ext_doc=0 ext_arc=0 ext_any=0 list_only=0 verbose=0
+extra_exts=()
+skip_exts=()
+base_dir="."
+
+depth_opts=()
+hidden_opts=( \( -path '*/.*' -prune \) -o )
+
+usage() {
+  cat <<EOF
+Usage: $(basename "$0") [OPTIONS] [DIR]
+
+Verify integrity for specified files in DIR (defaults to current path).
+With no file options all found files are checked (regardless of type).
+
+  -A, --all           check all supported types
+  -i, --img           check image files
+  -v, --vid           check video files
+  -a, --audio         check audio files
+  -d, --doc           check document files
+  -x, --arc           check archive files
+  -m, --media         shorthand for -iva
+  -e, --ext=EXT       attempt checking files with extension in EXT
+  -s, --skip=EXT      skip files with extension in EXT
+  -H, --hidden        check hidden files (skips by default)
+  -D, --depth=DEPTH   set maximum folder depth for checking
+  -l, --list          list files that would be checked, then exit (no checking)
+  -V, --verbose       list files first, then check with increased tool verbosity
+  -h, --help          show this help message
+
+  EXT                 a comma-separated list of file extensions
+
+Examples
+
+  $(basename "$0") pictures/pic.jpg
+  $(basename "$0") --img --vid --depth=1
+  $(basename "$0") -mdV
+  $(basename "$0") --ext=jpg,pdf -xD 1
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      usage; exit 0 ;;
+    --all)   ext_all=1; shift ;;
+    --img)   ext_img=1; shift ;;
+    --vid)   ext_vid=1; shift ;;
+    --audio) ext_aud=1; shift ;;
+    --doc)   ext_doc=1; shift ;;
+    --arc)   ext_arc=1; shift ;;
+    --media) ext_img=1; ext_vid=1; ext_aud=1; shift ;;
+    --hidden) hidden_opts=(); shift ;;
+    --depth) depth_opts=(-maxdepth "$2"); shift 2 || {
+      echo "Option $1 requires argument DEPTH" >&2
+      exit 1
+    } ;;
+    --depth=*) depth_opts=(-maxdepth "${1#--depth=}"); shift ;;
+    --list)  list_only=1; shift ;;
+    --verbose) verbose=1; shift ;;
+    -e|--ext)
+      if [[ $# -lt 2 ]]; then
+        echo "Option $1 requires argument EXT" >&2
+        exit 1
+      fi
+      IFS=',' read -ra parts <<< "$2"
+      for p in "${parts[@]}"; do
+        [[ -n "$p" ]] && extra_exts+=("${p,,}")
+      done
+      shift 2
+      ;;
+    --ext=*)
+      IFS=',' read -ra parts <<< "${1#--ext=}"
+      for p in "${parts[@]}"; do
+        [[ -n "$p" ]] && extra_exts+=("${p,,}")
+      done
+      shift
+      ;;
+    -s|--skip)
+      if [[ $# -lt 2 ]]; then
+        echo "Option $1 requires argument EXT" >&2
+        exit 1
+      fi
+      IFS=',' read -ra parts <<< "$2"
+      for p in "${parts[@]}"; do
+        [[ -n "$p" ]] && skip_exts+=("${p,,}")
+      done
+      shift 2
+      ;;
+    --skip=*)
+      IFS=',' read -ra parts <<< "${1#--skip=}"
+      for p in "${parts[@]}"; do
+        [[ -n "$p" ]] && skip_exts+=("${p,,}")
+      done
+      shift
+      ;;
+    --)
+      shift
+      [[ $# -gt 0 ]] && base_dir="$1"
+      shift
+      ;;
+    -*)
+      opt="${1:1}"
+      for (( i=0; i<${#opt}; i++ )); do
+        c="${opt:$i:1}"
+        case "$c" in
+          A) ext_all=1 ;;
+          i) ext_img=1 ;;
+          v) ext_vid=1 ;;
+          a) ext_aud=1 ;;
+          d) ext_doc=1 ;;
+          x) ext_arc=1 ;;
+          m) ext_img=1; ext_vid=1; ext_aud=1 ;;
+          D) depth_opts=(-maxdepth "$2"); shift || {
+            echo "Option $c requires a DEPTH argument" >&2
+            exit 1
+          } ;;
+          H) hidden_opts=() ;;
+          l) list_only=1 ;;
+          V) verbose=1 ;;
+          h) usage; exit 0 ;;
+          *) echo "Unknown option: -$c" >&2; usage; exit 1 ;;
+        esac
+      done
+      shift
+      ;;
+    *)
+      base_dir="$1"
+      shift
+      ;;
+  esac
+done
+
+if [[ ! -d "$base_dir" ]]; then
+  echo "Error: directory '$base_dir' not found." >&2
+  exit 1
+fi
+
+exts=()
+if [[ $ext_all -eq 1 ]]; then
+  exts+=("${img_exts[@]}" "${vid_exts[@]}" "${aud_exts[@]}" "${doc_exts[@]}" "${arc_exts[@]}")
+else
+  [[ $ext_img -eq 1 ]] && exts+=("${img_exts[@]}")
+  [[ $ext_vid -eq 1 ]] && exts+=("${vid_exts[@]}")
+  [[ $ext_aud -eq 1 ]] && exts+=("${aud_exts[@]}")
+  [[ $ext_doc -eq 1 ]] && exts+=("${doc_exts[@]}")
+  [[ $ext_arc -eq 1 ]] && exts+=("${arc_exts[@]}")
+fi
+exts+=("${extra_exts[@]}")
+
+if [[ ${#exts[@]} -gt 0 ]]; then
+  mapfile -t exts < <(printf '%s\n' "${exts[@]}" | sort -u)
+fi
+
+# no extensions given -> check anything
+[[ ${#exts[@]} -eq 0 ]] && ext_any=1
+
+skip_args=()
+if [[ ${#skip_exts[@]} -gt 0 ]]; then
+  skip_args+=(-not \()
+  first=1
+  for ext in "${skip_exts[@]}"; do
+    [[ $first -eq 0 ]] && skip_args+=(-o)
+    skip_args+=(-iname "*.${ext}")
+    first=0
+  done
+  skip_args+=(\))
+fi
+
+declare -A tool_seen
+require_tool() {
+  local t="$1"
+  if [[ -z "${tool_seen[$t]:-}" ]]; then
+    command -v "$t" >/dev/null 2>&1 && tool_seen[$t]=1 || tool_seen[$t]=0
+  fi
+  [[ "${tool_seen[$t]}" == "1" ]]
+}
+
+# fail if missing required tool when checking specific extensions
+if [[ $ext_any -eq 0 ]]; then
+  for ext in "${exts[@]}"; do
+    tool="${ext_tool[$ext]:-ffmpeg}"
+    require_tool "$tool" || { echo "Error: '$tool' not found in PATH (needed for .$ext)." >&2; exit 1; }
+  done
+fi
+
+find_args=()
+if [[ $ext_any -eq 0 ]]; then
+  first=1
+  for ext in "${exts[@]}"; do
+    [[ $first -eq 0 ]] && find_args+=(-o)
+    find_args+=(-iname "*.${ext}")
+    first=0
+  done
+fi
+
+# set globals result (OK/FAIL/SKIP) and fill errlog
+check_file() {
+  local file="$1" errlog="$2"
+  local ext="${file##*.}"
+  ext="${ext,,}"
+  local tool="${ext_tool[$ext]:-}"
+
+  [[ -z "$tool" ]] && tool="$ext_tool_default"
+
+  if ! require_tool "$tool"; then
+    echo "tool not found: $tool" > "$errlog"
+    result="FAIL"
+    return
+  fi
+
+  case "$tool" in
+    ffmpeg)
+      local lvl="error"
+      [[ $verbose -eq 1 ]] && lvl="warning"
+      ffmpeg -v "$lvl" -i "$file" -f null - 2>"$errlog"
+      local rc=$?
+      [[ $rc -eq 0 && ! -s "$errlog" ]] && result="OK" || result="FAIL"
+      ;;
+    qpdf)
+      qpdf --check "$file" >"$errlog" 2>&1
+      [[ $? -eq 0 ]] && result="OK" || result="FAIL"
+      ;;
+    unzip)
+      unzip -t "$file" >"$errlog" 2>&1
+      [[ $? -eq 0 ]] && result="OK" || result="FAIL"
+      ;;
+    tar)
+      if [[ $verbose -eq 1 ]]; then tar -tvf "$file" >"$errlog" 2>&1
+      else tar -tf "$file" >"$errlog" 2>&1
+      fi
+      [[ $? -eq 0 ]] && result="OK" || result="FAIL"
+      ;;
+    gzip)
+      if [[ $verbose -eq 1 ]]; then gzip -tv "$file" >"$errlog" 2>&1
+      else gzip -t "$file" >"$errlog" 2>&1
+      fi
+      [[ $? -eq 0 ]] && result="OK" || result="FAIL"
+      ;;
+    bzip2)
+      if [[ $verbose -eq 1 ]]; then bzip2 -tv "$file" >"$errlog" 2>&1
+      else bzip2 -t "$file" >"$errlog" 2>&1
+      fi
+      [[ $? -eq 0 ]] && result="OK" || result="FAIL"
+      ;;
+    7z)
+      if [[ $verbose -eq 1 ]]; then 7z t -bb3 "$file" >"$errlog" 2>&1
+      else 7z t "$file" >"$errlog" 2>&1
+      fi
+      [[ $? -eq 0 ]] && result="OK" || result="FAIL"
+      ;;
+    unrar)
+      unrar t "$file" >"$errlog" 2>&1
+      [[ $? -eq 0 ]] && result="OK" || result="FAIL"
+      ;;
+  esac
+}
+
+# gather matching files
+files=()
+if [[ $ext_any -eq 1 ]]; then
+  mapfile -d '' files < <(find "$base_dir" "${depth_opts[@]}" "${hidden_opts[@]}" -type f "${skip_args[@]}" -print0)
+else
+  mapfile -d '' files < <(find "$base_dir" "${depth_opts[@]}" "${hidden_opts[@]}" -type f \( "${find_args[@]}" \) "${skip_args[@]}" -print0)
+fi
+
+if [[ ${#files[@]} -eq 0 ]]; then
+  echo "No files found for given file types inside directory '$base_dir'."
+  if [[ $ext_any -eq 0 ]]; then
+    echo "Scanned '$base_dir' for: ${exts[*]}"
+  fi
+  exit 0
+fi
+
+if [[ $list_only -eq 1 || $verbose -eq 1 ]]; then
+  echo "Found (${#files[@]}) files for given file types inside directory '$base_dir':"
+  printf '  %s\n' "${files[@]}"
+  echo
+  [[ $list_only -eq 1 ]] && exit 0
+fi
+
+ok=0
+fail=0
+skip=0
+failed_files=()
+
+echo "Scanning '$base_dir'$([[ $ext_any -eq 0 ]] && [[ $verbose -eq 1 ]] && echo " for: ${exts[*]}") ..."
+echo
+
+for file in "${files[@]}"; do
+  errlog="$(mktemp)"
+  result=""
+  check_file "$file" "$errlog"
+  case "$result" in
+    OK)
+      echo "OK   : $file"
+      ok=$((ok+1))
+      [[ $verbose -eq 1 && -s "$errlog" ]] && sed 's/^/       /' "$errlog"
+      ;;
+    SKIP)
+      echo "SKIP : $file"
+      skip=$((skip+1))
+      ;;
+    FAIL)
+      echo "FAIL : $file"
+      sed 's/^/       /' "$errlog"
+      fail=$((fail+1))
+      failed_files+=("$file")
+      ;;
+  esac
+  rm -f "$errlog"
+done
+
+echo
+echo "----------------------------------------"
+echo "Checked: $((ok+fail))  OK: $ok  FAIL: $fail  SKIP: $skip"
+if [[ $fail -gt 0 ]]; then
+  echo
+  echo "Corrupt files:"
+  printf '  %s\n' "${failed_files[@]}"
+  exit 1
+fi
