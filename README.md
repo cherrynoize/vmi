@@ -44,5 +44,11 @@ vmi
 
 Unrecognized file types are scanned by default when no file type is specified,
 which will flag as *corrupt* any file **vmi** fails to decode (such as `.txt`
-files). To prevent this you can omit from scan (`--skip=...`) any specific file
-types you don't want verified.
+files). To prevent this you can ignore (`--skip=...`) any specific file
+types you don't want to be verified.
+
+## Todo
+
+- read from env vars files/file types to ignore
+- ignoring single files/directories
+- add *probe* (`ffprobe`) option to only check header metadata (faster)
