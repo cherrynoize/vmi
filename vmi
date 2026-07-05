@@ -154,8 +154,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ ! -d "$base_dir" ]]; then
-  echo "Error: directory '$base_dir' not found." >&2
+if [[ ! -e "$base_dir" ]]; then
+  echo "Error: '$base_dir' not found." >&2
   exit 1
 fi
 
