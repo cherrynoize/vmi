@@ -1,9 +1,9 @@
 # vmi — Verify Media Integrity
 
-I couldn't find any decent options online, so I made my own.
-
 **vmi** is a file integrity checker supporting multiple file types (image,
 video, audio, archives, formatted documents (PDFs), ...).
+
+I couldn't find a decent option anywhere, so I made my own.
 
 ## Install
 
@@ -42,6 +42,5 @@ directory run:
 vmi
 ```
 
-> [!note] Disclaimer
 > Unrecognized file types are scanned by default with no given file type.
 > This but this will flag as *corrupt* any file it fails to scan.
