@@ -43,6 +43,6 @@ vmi
 ```
 
 Unrecognized file types are scanned by default when no file type is specified,
-flagging as *corrupt* any file it fails to scan (such as `.txt` files). To
-prevent this you can omit from scan (`--skip=...`) any specific file types
-you don't want verified.
+which will flag as *corrupt* any file **vmi** fails to decode (such as `.txt`
+files). To prevent this you can omit from scan (`--skip=...`) any specific file
+types you don't want verified.
