@@ -42,5 +42,7 @@ directory run:
 vmi
 ```
 
-> Unrecognized file types are scanned by default with no given file type.
-> This but this will flag as *corrupt* any file it fails to scan.
+Unrecognized file types are scanned by default when no file type is specified,
+flagging as *corrupt* any file it fails to scan (such as `.txt` files). To
+prevent this you can omit from scan (`--skip=...`) any specific file types
+you don't want verified.
