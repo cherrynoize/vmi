@@ -1,7 +1,7 @@
 # vmi — Verify Media Integrity
 
-**vmi** is a file integrity checker supporting multiple file types (image,
-video, audio, archives, formatted documents (PDFs), ...).
+**vmi** is a file integrity checker supporting image, audio, video, archive
+and formatted document (PDF) file types.
 
 I couldn't find a decent option anywhere, so I made my own.
 
