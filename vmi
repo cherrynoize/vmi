@@ -283,6 +283,8 @@ check_file() {
   esac
 }
 
+printf 'Locating files for scanning... (this may take a while for large folders)\n'
+
 # gather matching files
 files=()
 if [[ $ext_any -eq 1 ]]; then
@@ -290,6 +292,8 @@ if [[ $ext_any -eq 1 ]]; then
 else
   mapfile -d '' files < <(find "$base_dir" "${depth_opts[@]}" "${hidden_opts[@]}" -type f \( "${find_args[@]}" \) "${skip_args[@]}" -print0)
 fi
+
+printf '\r\033[K'
 
 if [[ ${#files[@]} -eq 0 ]]; then
   echo "No files of given file types found inside directory '$base_dir'."
